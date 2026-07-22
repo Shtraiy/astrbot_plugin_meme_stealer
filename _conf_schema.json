@@ -1,13 +1,11 @@
 {
-  "type": "object",
-  "properties": {
     "enabled": {
-      "type": "boolean",
+      "type": "bool",
       "description": "是否启用自动偷取",
       "default": true
     },
     "group_whitelist": {
-      "type": "array",
+      "type": "list",
       "items": { "type": "string" },
       "description": "群号或完整 UMO 白名单；为空时允许全部群",
       "default": []
@@ -28,24 +26,24 @@
       "default": ""
     },
     "only_capture_memes": {
-      "type": "boolean",
+      "type": "bool",
       "description": "是否跳过视觉模型判定为普通照片的图片",
       "default": true
     },
     "perceptual_dedupe_enabled": {
-      "type": "boolean",
+      "type": "bool",
       "description": "鍦ㄦā鍨嬭姹傚墠妫€鏌ョ浉浼煎浘鐗囬噸澶嶏紝Pillow 缂哄け鏃惰嚜鍔ㄥ洖閫€涓鸿璁惧幓閲嶏紒",
       "default": true
     },
     "perceptual_duplicate_threshold": {
-      "type": "integer",
+      "type": "int",
       "description": "鎰熺煡鍝堝笇鐨勬渶澶у搷搴旇窛绂伙紝鍊艰秺灏忚秺涓ユ牸",
       "default": 6,
       "minimum": 0,
       "maximum": 16
     },
     "meme_rejection_confidence": {
-      "type": "number",
+      "type": "float",
       "description": "判定为普通照片并跳过保存的最低置信度",
       "default": 0.7,
       "minimum": 0,
@@ -57,68 +55,68 @@
       "default": "confused"
     },
     "max_images_per_message": {
-      "type": "integer",
+      "type": "int",
       "description": "每条消息最多处理多少张图片",
       "default": 2,
       "minimum": 1,
       "maximum": 6
     },
     "max_image_size_mb": {
-      "type": "integer",
+      "type": "int",
       "description": "单张图片最大大小（MB）",
       "default": 10,
       "minimum": 1,
       "maximum": 50
     },
     "download_timeout": {
-      "type": "integer",
+      "type": "int",
       "description": "下载图片超时时间（秒）",
       "default": 20,
       "minimum": 5,
       "maximum": 120
     },
     "max_concurrent": {
-      "type": "integer",
+      "type": "int",
       "description": "同时进行识别的图片数量",
       "default": 2,
       "minimum": 1,
       "maximum": 8
     },
     "health_check_interval": {
-      "type": "integer",
+      "type": "int",
       "description": "检查 meme_manager 插件和数据目录的间隔（秒）",
       "default": 60,
       "minimum": 10,
       "maximum": 600
     },
     "auto_send_enabled": {
-      "type": "boolean",
+      "type": "bool",
       "description": "是否由本插件统一接管机器人表情包发送",
       "default": true
     },
     "auto_send_probability": {
-      "type": "number",
+      "type": "float",
       "description": "符合情景时发送表情包的概率（百分比）",
       "default": 35,
       "minimum": 0,
       "maximum": 100
     },
     "auto_send_cooldown": {
-      "type": "number",
+      "type": "float",
       "description": "同一会话两次自动发送表情包的最短间隔（秒）",
       "default": 30,
       "minimum": 0,
       "maximum": 3600
     },
     "auto_send_candidate_limit": {
-      "type": "integer",
+      "type": "int",
       "description": "每次智能回复表情最多交给多模态模型比较的候选图片数",
       "default": 8,
       "minimum": 2,
       "maximum": 16
     },
     "library_index_enabled": {
-      "type": "boolean",
+      "type": "bool",
       "description": "meme_manager 正常运行后是否自动补齐本地表情包索引",
       "default": true
     },
@@ -128,23 +126,22 @@
       "default": ""
     },
     "library_index_progress_step": {
-      "type": "integer",
+      "type": "int",
       "description": "后台索引每处理多少张图片写入一次进度日志",
       "default": 5,
       "minimum": 1,
       "maximum": 50
     },
     "library_index_batch_size": {
-      "type": "integer",
+      "type": "int",
       "description": "后台索引一次提交给多模态模型的图片数量",
       "default": 6,
       "minimum": 1,
       "maximum": 12
     },
     "library_index_rename_files": {
-      "type": "boolean",
+      "type": "bool",
       "description": "后台索引时是否只在原分类目录内将图片重命名为 category_0001 格式",
       "default": true
     }
-  }
 }
