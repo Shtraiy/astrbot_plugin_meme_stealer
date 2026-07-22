@@ -22,9 +22,9 @@
 ## 配置
 
 - `group_whitelist`：群号或完整 UMO 白名单。留空表示全部群，建议生产环境填写需要收集的群。
-- `vision_provider_id`：自定义视觉模型 Provider ID，必须支持图片输入；留空时使用当前会话 Provider。
-- `scene_provider_id`：用于“偷取后分类”的情景模型 Provider ID；留空时使用当前会话 Provider。
-- `reply_scene_provider_id`：用于判断机器人回复是否需要表情包、选择分类并比较候选图片的多模态 Provider ID；留空时复用 `scene_provider_id`。
+- `vision_provider_id`：从 AstrBot 已配置的模型提供商中选择视觉模型，必须支持图片输入；留空时使用当前会话 Provider。
+- `scene_provider_id`：从 AstrBot 已配置的模型提供商中选择“偷取后分类”的情景模型；留空时使用当前会话 Provider。
+- `reply_scene_provider_id`：从 AstrBot 已配置的模型提供商中选择判断机器人回复和匹配候选图片的多模态模型；留空时复用 `scene_provider_id`。
 - `only_capture_memes`：开启后跳过视觉模型判定为普通照片的图片。
 - `fallback_category`：模型不可用或返回非法分类时的降级目录，默认 `confused`。
 - `max_images_per_message`、`max_image_size_mb`、`max_concurrent`：控制资源和模型调用成本。
@@ -33,7 +33,7 @@
 - `auto_send_probability`：情景模型判定适合发送后，实际发送概率，默认 35%。
 - `auto_send_cooldown`：同一会话自动发送的最短间隔，默认 30 秒。
 - `auto_send_candidate_limit`：每次发送前交给多模态模型比较的候选图片数，默认 8。
-- `library_index_provider_id`：后台自动整理已有表情包库使用的多模态 Provider；为空时复用 `vision_provider_id`。后台任务需要明确的 Provider ID。
+- `library_index_provider_id`：从 AstrBot 已配置的模型提供商中选择后台整理已有表情包库使用的多模态模型；为空时复用 `vision_provider_id`。后台任务需要明确的 Provider ID。
 - `library_index_enabled`：meme_manager 正常运行后是否自动补齐本地表情包索引。
 - `library_index_progress_step`：后台索引每处理多少张图片写入一次进度日志。
 - `library_index_batch_size`：后台索引一次提交给多模态模型的图片数量，默认 6；Gemini 建议设置为 4～8。
@@ -53,7 +53,7 @@
 
 插件在 AstrBot 的发送前钩子中以高优先级运行：先清理 meme_manager 的 `&&happy&&`、`&&shy&&` 等内联标记阻止其发送；随后由 `reply_scene_provider_id` 指定的情景模型判断 `should_send`。只有需要发送时，才根据模型返回的分类进入对应目录，再把该目录中的候选图片和图片索引交给多模态模型，选出最符合当前回复的一张并发送。
 
-模型入口不是在本插件中填写 API Key 或模型名称，而是在 AstrBot 的 Provider 管理中配置支持的模型，再把对应 Provider ID 填入以上配置。`vision_provider_id`、`reply_scene_provider_id` 和 `library_index_provider_id` 都必须支持图片输入；`scene_provider_id` 在只用于偷取分类时可以是文本模型。
+模型入口不是在本插件中填写 API Key 或模型名称。以上 Provider 配置项会直接显示 AstrBot 面板中已经配置好的模型提供商，选择后保存即可；`vision_provider_id`、`reply_scene_provider_id` 和 `library_index_provider_id` 都必须支持图片输入；`scene_provider_id` 在只用于偷取分类时可以是文本模型。
 
 因此 meme_manager 的自动发送设置不会再决定最终是否发图；它仍负责 WebUI、分类管理、云同步和文件维护。本插件只接管自动发送出口。发送模型不可用、没有合适分类或分类目录没有图片时，会保持不发送。
 
