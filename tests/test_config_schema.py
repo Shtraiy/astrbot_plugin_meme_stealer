@@ -4,6 +4,15 @@ from pathlib import Path
 
 
 class ConfigSchemaTests(unittest.TestCase):
+    def test_plugin_display_name_is_meme_master(self):
+        root = Path(__file__).resolve().parents[1]
+
+        metadata = (root / "metadata.yaml").read_text(encoding="utf-8")
+        readme = (root / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("display_name: 表情包偷取大师", metadata)
+        self.assertIn("# AstrBot 表情包偷取大师", readme)
+
     def test_schema_uses_astrbot_plugin_config_shape(self):
         schema = json.loads(
             (Path(__file__).resolve().parents[1] / "_conf_schema.json").read_text(
