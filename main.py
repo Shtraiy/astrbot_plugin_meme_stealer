@@ -124,6 +124,7 @@ class MemeStealer(Star):
         self._library_task: asyncio.Task | None = None
         self._library_lock = asyncio.Lock()
         self._last_auto_send: dict[str, float] = {}
+        self._last_stolen_image: dict[str, Path] = {}
 
     async def initialize(self) -> None:
         """Check the required plugin before accepting any image."""
@@ -250,6 +251,29 @@ class MemeStealer(Star):
             counts[result] = counts.get(result, 0) + 1
         details = "，".join(f"{summary.get(key, key)} {value} 张" for key, value in counts.items())
         yield event.plain_result(f"偷取处理完成：{details}")
+
+    @filter.command("发送表情包", priority=100000)
+    @filter.command("发刚才的表情包", priority=100000)
+    async def send_last_stolen_image(self, event: AstrMessageEvent):
+        """Send the most recently saved meme from this chat session."""
+        if not await self._manager_ready():
+            yield event.plain_result("meme_manager 当前不可用，暂时无法发送表情包。")
+            return
+        if not group_id_from_event(event):
+            yield event.plain_result("发送表情包只允许在群聊中使用。")
+            return
+        if not whitelist_allows(event, self._whitelist()):
+            yield event.plain_result("当前群不在表情包偷取白名单中。")
+            return
+
+        umo = str(getattr(event, "unified_msg_origin", "") or "")
+        image_path = self._last_stolen_image.get(umo)
+        if image_path is None or not image_path.is_file():
+            yield event.plain_result("当前会话还没有可发送的表情包，请先发送 /偷取 [图片]。")
+            return
+
+        event.stop_event()
+        yield event.chain_result([Comp.Image.fromFileSystem(str(image_path))])
 
     @filter.command("表情偷取状态")
     async def status(self, event: AstrMessageEvent):
@@ -431,6 +455,10 @@ class MemeStealer(Star):
                             payload.extension,
                             self._perceptual_duplicate_threshold(),
                         )
+                    if result.status in {"saved", "duplicate"}:
+                        umo = str(getattr(event, "unified_msg_origin", "") or "")
+                        if umo:
+                            self._last_stolen_image[umo] = result.path
                     statuses[index] = result.status
                     if result.status == "saved":
                         catalog_entry = self._catalog_entry_from_vision(
