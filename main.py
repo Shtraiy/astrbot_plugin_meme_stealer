@@ -17,7 +17,7 @@ from urllib.parse import unquote, urlparse
 import aiohttp
 from astrbot.api import logger
 import astrbot.api.message_components as Comp
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.event.filter import EventMessageType
 from astrbot.api.star import Context, Star, register
 
@@ -208,7 +208,7 @@ class MemeStealer(Star):
 
         text = self._event_text(event)
         outline = self._event_outline(event)
-        task = asyncio.create_task(self._process_batch(event, sources[:limit], text, outline))
+        task = asyncio.create_task(self._process_and_maybe_send(event, sources[:limit], text, outline))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         task.add_done_callback(self._log_task_failure)
@@ -238,6 +238,7 @@ class MemeStealer(Star):
         text = self._event_text(event)
         outline = self._event_outline(event)
         results = await self._process_batch(event, sources[:limit], text, outline)
+        await self._send_stolen_image_proactively(event, results)
         event.stop_event()
         summary = {
             "saved": "已保存",
@@ -251,6 +252,37 @@ class MemeStealer(Star):
             counts[result] = counts.get(result, 0) + 1
         details = "，".join(f"{summary.get(key, key)} {value} 张" for key, value in counts.items())
         yield event.plain_result(f"偷取处理完成：{details}")
+
+    async def _process_and_maybe_send(
+        self,
+        event: AstrMessageEvent,
+        sources: list[str],
+        message_text: str,
+        message_outline: str,
+    ) -> None:
+        results = await self._process_batch(event, sources, message_text, message_outline)
+        await self._send_stolen_image_proactively(event, results)
+
+    async def _send_stolen_image_proactively(
+        self,
+        event: AstrMessageEvent,
+        results: list[str],
+    ) -> None:
+        """Send the latest captured image through an independent message path."""
+        if not self._bool_config("proactive_send_after_steal", False):
+            return
+        if not any(status in {"saved", "duplicate"} for status in results):
+            return
+        umo = str(getattr(event, "unified_msg_origin", "") or "")
+        image_path = self._last_stolen_image.get(umo)
+        if not umo or image_path is None or not image_path.is_file():
+            return
+        try:
+            message_chain = MessageChain().file_image(str(image_path))
+            await self.context.send_message(umo, message_chain)
+            logger.info("[meme_stealer] 偷取后主动发送表情包 path=%s", image_path)
+        except Exception as exc:
+            logger.warning("[meme_stealer] 偷取后主动发送失败: %s", exc, exc_info=True)
 
     @filter.command("发送表情包", priority=100000)
     @filter.command("发刚才的表情包", priority=100000)

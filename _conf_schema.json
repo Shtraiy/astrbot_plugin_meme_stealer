@@ -97,6 +97,11 @@
       "description": "是否由本插件统一接管机器人表情包发送",
       "default": true
     },
+    "proactive_send_after_steal": {
+      "type": "bool",
+      "description": "偷取成功后主动发送最近保存的表情包；开启后自动监听收图也会发送，请谨慎开启",
+      "default": false
+    },
     "auto_send_probability": {
       "type": "float",
       "description": "符合情景时发送表情包的概率（百分比）",

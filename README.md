@@ -30,6 +30,7 @@
 - `max_images_per_message`、`max_image_size_mb`、`max_concurrent`：控制资源和模型调用成本。
 - `health_check_interval`：依赖插件健康检查间隔，默认 60 秒。
 - `auto_send_enabled`：启用后由本插件统一接管自动表情包发送，默认开启。
+- `proactive_send_after_steal`：偷取成功后通过独立主动消息发送最近保存的表情包，默认关闭；开启后自动监听收图也会发送，请谨慎开启。
 - `auto_send_probability`：情景模型判定适合发送后，实际发送概率，默认 35%。
 - `auto_send_cooldown`：同一会话自动发送的最短间隔，默认 30 秒。
 - `auto_send_candidate_limit`：每次发送前交给多模态模型比较的候选图片数，默认 8。
