@@ -183,8 +183,17 @@ class MemeStealer(Star):
             logger.error("[meme_stealer] 后台表情包索引任务异常: %s", exception)
 
     @filter.event_message_type(EventMessageType.ALL)
-    async def on_message(self, event: AstrMessageEvent) -> None:
-        """Queue group images for background recognition and storage."""
+    async def on_message(
+        self,
+        event: AstrMessageEvent,
+        *_args: object,
+        **_kwargs: object,
+    ) -> None:
+        """Queue group images for background recognition and storage.
+
+        AstrBot's pipeline may forward extra handler arguments.  This listener
+        only needs the event, so accept and ignore those compatibility args.
+        """
         if getattr(event, "_meme_stealer_manual", False):
             return
         if not self._bool_config("enabled", True):
