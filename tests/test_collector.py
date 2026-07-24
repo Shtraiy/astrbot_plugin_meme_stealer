@@ -2,6 +2,7 @@ import unittest
 
 from collector import (
     configured_provider_id,
+    explicit_meme_request,
     extract_meme_markers,
     extract_image_sources,
     normalize_category,
@@ -78,6 +79,12 @@ class CollectorTests(unittest.TestCase):
             extract_meme_markers("&&shy&& text &&happy&& &&shy&&"),
             ["shy", "happy"],
         )
+
+    def test_explicit_meme_request_bypasses_automatic_probability(self):
+        self.assertTrue(explicit_meme_request("可以发一下你的表情包库里的笨蛋表情吗"))
+        self.assertTrue(explicit_meme_request("给我来一张图"))
+        self.assertFalse(explicit_meme_request("今天的图片说明很清楚"))
+        self.assertFalse(explicit_meme_request("不要发图片"))
 
 
 if __name__ == "__main__":

@@ -60,6 +60,31 @@ def extract_meme_markers(text: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r"&&([A-Za-z0-9_-]+)&&", str(text or ""))))
 
 
+def explicit_meme_request(text: str) -> bool:
+    """Detect a direct request to send a meme/image, excluding negative requests."""
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if re.search(
+        r"(?:不要|别|不用|无需|不需要|不想).{0,8}(?:发|发送|来).{0,12}(?:表情包|表情|图片|图)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:发|发送|来|给我|请|可以|能不能|能否).{0,20}(?:表情包|表情|图片|图|meme)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:表情包|表情|图片|图).{0,8}(?:发|发送|来)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _read_value(value: Any, key: str, default: Any = None) -> Any:
     if isinstance(value, Mapping):
         return value.get(key, default)

@@ -23,6 +23,7 @@ from astrbot.api.star import Context, Star, register
 
 from .collector import (
     configured_provider_id,
+    explicit_meme_request,
     extract_meme_markers,
     extract_image_sources,
     group_id_from_event,
@@ -351,11 +352,12 @@ class MemeStealer(Star):
                 component.text = cleaned
             if cleaned:
                 plain_texts.append(cleaned)
+        force_send = explicit_meme_request(self._event_text(event))
 
         # Marker cleanup always happens, even if our own sender is disabled.
         if (
             not self._bool_config("auto_send_enabled", True)
-            or (not plain_texts and not marked_categories)
+            or (not plain_texts and not marked_categories and not force_send)
             or self._is_control_command(event)
             or not await self._manager_ready()
         ):
@@ -363,36 +365,22 @@ class MemeStealer(Star):
 
         umo = str(getattr(event, "unified_msg_origin", "") or "")
         cooldown = self._float_config("auto_send_cooldown", 30, 0, 3600)
-        if cooldown and time.monotonic() - self._last_auto_send.get(umo, 0) < cooldown:
-            return
-
-        if marked_categories:
-            image_path = self._pick_marked_meme(marked_categories)
-            if image_path is None:
-                logger.warning(
-                    "[meme_stealer] meme_manager 已选择分类但没有可发送图片 categories=%s",
-                    marked_categories,
-                )
-                return
-            chain.append(Comp.Image.fromFileSystem(str(image_path)))
-            self._last_auto_send[umo] = time.monotonic()
-            details = self._image_details(image_path)
-            logger.info(
-                "[meme_stealer] 发送表情包 source=marker category=%s file=%s "
-                "description=%s emotion=%s tags=%s reason=指定分类:%s",
-                details["category"],
-                details["filename"],
-                details["description"],
-                details["emotion"],
-                details["tags"],
-                marked_categories,
-            )
+        if (
+            cooldown
+            and not force_send
+            and time.monotonic() - self._last_auto_send.get(umo, 0) < cooldown
+        ):
             return
 
         probability = self._float_config("auto_send_probability", 35, 0, 100)
-        if probability <= 0 or random.random() * 100 >= probability:
+        if not force_send and (probability <= 0 or random.random() * 100 >= probability):
             return
-        image_path = await self._choose_outgoing_meme(event, "\n".join(plain_texts))
+        image_path = await self._choose_outgoing_meme(
+            event,
+            "\n".join(plain_texts),
+            force_send=force_send,
+            preferred_categories=marked_categories,
+        )
         if image_path is None:
             logger.debug("[meme_stealer] 情景模型未选择可发送表情包")
             return
@@ -400,8 +388,11 @@ class MemeStealer(Star):
         self._last_auto_send[umo] = time.monotonic()
         details = self._image_details(image_path)
         logger.info(
-            "[meme_stealer] 发送表情包 source=scene category=%s file=%s "
+            "[meme_stealer] 发送表情包 source=%s category=%s file=%s "
             "description=%s emotion=%s tags=%s",
+            "explicit_request" if force_send else (
+                "scene_with_category_hint" if marked_categories else "scene"
+            ),
             details["category"],
             details["filename"],
             details["description"],
@@ -812,11 +803,16 @@ class MemeStealer(Star):
         self,
         event: AstrMessageEvent,
         response_text: str,
+        force_send: bool = False,
+        preferred_categories: list[str] | None = None,
     ) -> Path | None:
         """Use one multimodal call for should_send, category, and candidate choice."""
         descriptions = self.store.category_descriptions()
+        preferred = set(preferred_categories or [])
         candidates = []
         for category in sorted(descriptions):
+            if preferred and category not in preferred:
+                continue
             paths = self.store.image_paths(category)
             if not paths:
                 continue
@@ -855,6 +851,8 @@ class MemeStealer(Star):
                 [
                     f"用户:{self._event_text(event)[:300]}",
                     f"回复:{response_text[:600]}",
+                    f"explicit_request={'true' if force_send else 'false'}",
+                    f"category_hint={','.join(sorted(preferred)) or 'none'}",
                     "候选(id|分类|描述|情绪|标签):",
                     *[
                         f"{item['id']}|{item['category']}|{item['description'][:80]}|"
@@ -929,17 +927,6 @@ class MemeStealer(Star):
             "emotion": str(entry.get("emotion", "") or "")[:40],
             "tags": [str(tag)[:30] for tag in tags[:5]],
         }
-
-    def _pick_marked_meme(self, categories: list[str]) -> Path | None:
-        """Pick an image from the category explicitly selected by meme_manager."""
-        available = self.store.available_categories()
-        for category in categories:
-            if category not in available:
-                continue
-            image_path = self.store.pick_image(category)
-            if image_path is not None:
-                return image_path
-        return None
 
     @staticmethod
     def _catalog_entry_from_vision(path: Path, category: str, vision: dict, scene: dict) -> dict:
