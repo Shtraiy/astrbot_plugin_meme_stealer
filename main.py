@@ -104,7 +104,7 @@ OUTGOING_DECISION_COMPACT_PROMPT = """
 OUTGOING_CATEGORY_PROMPT = """
 你是表情包情景分类器。
 根据用户消息和机器人回复，判断是否发送表情包；若发送，只能从候选分类中选一个最合适的 category。
-explicit_request=true 只表示用户明确索要图片，仍由你根据情景决定 should_send。
+explicit_request=true 表示用户明确索要表情包，此时必须发送，should_send 必须为 true，只需选择最合适的 category。
 只输出 JSON：{"should_send":false,"category":"","confidence":0.0,"reason":"不超过20字"}
 """.strip()
 
@@ -854,7 +854,9 @@ class MemeStealer(Star):
                     }
                 )
         limit = self._int_config("auto_send_candidate_limit", 8, 2, 16)
-        if len(candidates) > limit:
+        # Explicit requests must see every indexed category; random sampling
+        # could otherwise omit the category the user explicitly requested.
+        if len(candidates) > limit and not force_send and not preferred:
             candidates = random.sample(candidates, limit)
         if not candidates:
             logger.warning(
@@ -891,7 +893,14 @@ class MemeStealer(Star):
             choice = parse_model_json(response)
             reason = str(choice.get("reason", "") or "")[:80]
             confidence = choice.get("confidence", "")
-            if not self._model_bool(choice.get("should_send"), default=False):
+            model_should_send = self._model_bool(
+                choice.get("should_send"), default=False
+            )
+            if force_send and not model_should_send:
+                logger.info(
+                    "[meme_stealer] 明确请求覆盖模型的不发送判断，继续选择分类"
+                )
+            if not force_send and not model_should_send:
                 logger.info(
                     "[meme_stealer] 情景分析决定不发送 confidence=%s reason=%s",
                     confidence,
