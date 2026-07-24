@@ -4,6 +4,18 @@ from pathlib import Path
 
 
 class ConfigSchemaTests(unittest.TestCase):
+    def test_metadata_points_to_the_plugin_repository(self):
+        root = Path(__file__).resolve().parents[1]
+        metadata = (root / "metadata.yaml").read_text(encoding="utf-8")
+
+        repo_line = next(
+            line for line in metadata.splitlines() if line.startswith("repo:")
+        )
+        self.assertEqual(
+            repo_line,
+            "repo: https://github.com/Shtraiy/astrbot_plugin_meme_stealer",
+        )
+
     def test_plugin_display_name_is_meme_master(self):
         root = Path(__file__).resolve().parents[1]
 
