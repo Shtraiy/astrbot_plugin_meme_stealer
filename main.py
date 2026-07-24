@@ -145,6 +145,7 @@ class MemeStealer(Star):
         self._last_auto_send: dict[str, float] = {}
         self._auto_send_claims: dict[str, float] = {}
         self._auto_send_claim_lock = asyncio.Lock()
+        self._pending_auto_images: dict[str, tuple[str, Path]] = {}
         self._last_stolen_image: dict[str, Path] = {}
 
     async def initialize(self) -> None:
@@ -410,11 +411,18 @@ class MemeStealer(Star):
         if image_path is None:
             logger.debug("[meme_stealer] 情景模型未选择可发送表情包")
             return
-        chain.append(Comp.Image.fromFileSystem(str(image_path)))
-        self._last_auto_send[umo] = time.monotonic()
         details = self._image_details(image_path)
+        if force_send:
+            confirmation = "找到了一个合适的表情包，发给你～"
+            replaced = False
+            for component in chain:
+                if not hasattr(component, "text"):
+                    continue
+                component.text = confirmation if not replaced else ""
+                replaced = True
+        self._pending_auto_images[event_identity(event)] = (umo, image_path)
         logger.info(
-            "[meme_stealer] 发送表情包 source=%s category=%s file=%s "
+            "[meme_stealer] 已锁定表情包，等待正文发送完成 source=%s category=%s file=%s "
             "description=%s emotion=%s tags=%s",
             "explicit_request" if force_send else (
                 "scene_with_category_hint" if marked_categories else "scene"
@@ -425,6 +433,34 @@ class MemeStealer(Star):
             details["emotion"],
             details["tags"],
         )
+
+    @filter.after_message_sent(priority=0)
+    async def after_message_sent(self, event: AstrMessageEvent) -> None:
+        """Send a selected meme only after the text response is sent."""
+        key = event_identity(event)
+        pending = self._pending_auto_images.pop(key, None)
+        if pending is None:
+            umo = str(getattr(event, "unified_msg_origin", "") or "")
+            for pending_key, candidate in list(self._pending_auto_images.items()):
+                if candidate[0] == umo:
+                    pending = self._pending_auto_images.pop(pending_key)
+                    break
+        if pending is None:
+            return
+
+        umo, image_path = pending
+        if not image_path.is_file():
+            logger.warning("[meme_stealer] deferred meme file is missing: %s", image_path)
+            return
+        try:
+            await self.context.send_message(
+                umo,
+                MessageChain().file_image(str(image_path)),
+            )
+            self._last_auto_send[umo] = time.monotonic()
+            logger.info("[meme_stealer] text sent; deferred meme sent file=%s", image_path)
+        except Exception as exc:
+            logger.warning("[meme_stealer] deferred meme send failed: %s", exc)
 
     async def _process_one(
         self,
