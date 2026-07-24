@@ -2,6 +2,7 @@ import unittest
 
 from collector import (
     configured_provider_id,
+    extract_meme_markers,
     extract_image_sources,
     normalize_category,
     parse_model_json,
@@ -71,6 +72,12 @@ class CollectorTests(unittest.TestCase):
 
     def test_strip_meme_manager_markers(self):
         self.assertEqual(strip_meme_markers("你好 &&happy&& 世界 &&unknown&&"), "你好  世界")
+
+    def test_extract_meme_markers_deduplicates_categories(self):
+        self.assertEqual(
+            extract_meme_markers("&&shy&& text &&happy&& &&shy&&"),
+            ["shy", "happy"],
+        )
 
 
 if __name__ == "__main__":

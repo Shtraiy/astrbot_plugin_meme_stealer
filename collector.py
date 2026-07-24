@@ -55,6 +55,11 @@ def strip_meme_markers(text: str) -> str:
     return re.sub(r"&&[A-Za-z0-9_-]+&&", "", str(text or "")).strip()
 
 
+def extract_meme_markers(text: str) -> list[str]:
+    """Return unique meme_manager categories in marker order."""
+    return list(dict.fromkeys(re.findall(r"&&([A-Za-z0-9_-]+)&&", str(text or ""))))
+
+
 def _read_value(value: Any, key: str, default: Any = None) -> Any:
     if isinstance(value, Mapping):
         return value.get(key, default)

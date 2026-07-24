@@ -23,6 +23,7 @@ from astrbot.api.star import Context, Star, register
 
 from .collector import (
     configured_provider_id,
+    extract_meme_markers,
     extract_image_sources,
     group_id_from_event,
     normalize_category,
@@ -87,6 +88,14 @@ OUTGOING_DECISION_SYSTEM_PROMPT = """
 只输出 JSON，不要 Markdown。
 格式：
 {"should_send":false, "category":"", "candidate_id":"", "confidence":0.0, "reason":"不超过30字"}
+""".strip()
+
+
+OUTGOING_DECISION_COMPACT_PROMPT = """
+你是表情包发送决策器。
+根据用户消息、机器人回复和候选图片，判断是否发送一张最匹配的表情包。
+明确索要表情包或回复有明显情绪时可发送；事实说明、长文、报错或无明显情绪时不发送。
+只输出 JSON：{"should_send":false,"category":"","candidate_id":"","confidence":0.0,"reason":"不超过20字"}
 """.strip()
 
 
@@ -331,10 +340,12 @@ class MemeStealer(Star):
             return
 
         plain_texts: list[str] = []
+        marked_categories: list[str] = []
         for component in chain:
             if not hasattr(component, "text"):
                 continue
             original = str(getattr(component, "text", "") or "")
+            marked_categories.extend(extract_meme_markers(original))
             cleaned = strip_meme_markers(original)
             if cleaned != original:
                 component.text = cleaned
@@ -344,7 +355,7 @@ class MemeStealer(Star):
         # Marker cleanup always happens, even if our own sender is disabled.
         if (
             not self._bool_config("auto_send_enabled", True)
-            or not plain_texts
+            or (not plain_texts and not marked_categories)
             or self._is_control_command(event)
             or not await self._manager_ready()
         ):
@@ -355,6 +366,29 @@ class MemeStealer(Star):
         if cooldown and time.monotonic() - self._last_auto_send.get(umo, 0) < cooldown:
             return
 
+        if marked_categories:
+            image_path = self._pick_marked_meme(marked_categories)
+            if image_path is None:
+                logger.warning(
+                    "[meme_stealer] meme_manager 已选择分类但没有可发送图片 categories=%s",
+                    marked_categories,
+                )
+                return
+            chain.append(Comp.Image.fromFileSystem(str(image_path)))
+            self._last_auto_send[umo] = time.monotonic()
+            details = self._image_details(image_path)
+            logger.info(
+                "[meme_stealer] 发送表情包 source=marker category=%s file=%s "
+                "description=%s emotion=%s tags=%s reason=指定分类:%s",
+                details["category"],
+                details["filename"],
+                details["description"],
+                details["emotion"],
+                details["tags"],
+                marked_categories,
+            )
+            return
+
         probability = self._float_config("auto_send_probability", 35, 0, 100)
         if probability <= 0 or random.random() * 100 >= probability:
             return
@@ -362,9 +396,18 @@ class MemeStealer(Star):
         if image_path is None:
             logger.debug("[meme_stealer] 情景模型未选择可发送表情包")
             return
-        chain.append(Comp.Image(file=str(image_path)))
+        chain.append(Comp.Image.fromFileSystem(str(image_path)))
         self._last_auto_send[umo] = time.monotonic()
-        logger.info("[meme_stealer] 统一发送表情包 path=%s", image_path)
+        details = self._image_details(image_path)
+        logger.info(
+            "[meme_stealer] 发送表情包 source=scene category=%s file=%s "
+            "description=%s emotion=%s tags=%s",
+            details["category"],
+            details["filename"],
+            details["description"],
+            details["emotion"],
+            details["tags"],
+        )
 
     async def _process_one(
         self,
@@ -786,6 +829,11 @@ class MemeStealer(Star):
             # One representative per category keeps the single request bounded.
             path = random.choice(paths)
             item = indexed.get(path.name, {})
+            raw_tags = item.get("tags", [])
+            if isinstance(raw_tags, str):
+                raw_tags = [raw_tags]
+            if not isinstance(raw_tags, list):
+                raw_tags = []
             candidates.append(
                 {
                     "id": str(item.get("id") or path.stem),
@@ -793,7 +841,7 @@ class MemeStealer(Star):
                     "filename": path.name,
                     "description": str(item.get("description") or "未建立索引"),
                     "emotion": str(item.get("emotion") or "未知"),
-                    "tags": item.get("tags", []),
+                    "tags": [str(tag)[:30] for tag in raw_tags[:8]],
                     "path": path,
                 }
             )
@@ -802,25 +850,19 @@ class MemeStealer(Star):
             candidates = random.sample(candidates, limit)
         if not candidates:
             return None
-        category_text = "\n".join(
-            f"- {category}: {description}" for category, description in sorted(descriptions.items())
-        )
-        candidate_text = "\n".join(
-            f"候选 id={item['id']}, category={item['category']}, 文件={item['filename']}, "
-            f"情绪={item['emotion']}, 描述={item['description']}, 标签={item['tags']}"
-            for item in candidates
-        )
-        prompt = "\n".join(
-            [
-                f"机器人回复：{response_text[:1200]}",
-                "可用分类：",
-                category_text,
-                "候选图片：",
-                candidate_text,
-                "请先判断是否发送，再选择候选图片；should_send=false 时 candidate_id 为空。",
-            ]
-        )
         try:
+            prompt = "\n".join(
+                [
+                    f"用户:{self._event_text(event)[:300]}",
+                    f"回复:{response_text[:600]}",
+                    "候选(id|分类|描述|情绪|标签):",
+                    *[
+                        f"{item['id']}|{item['category']}|{item['description'][:80]}|"
+                        f"{item['emotion']}|{','.join(map(str, item['tags'][:5]))}"
+                        for item in candidates
+                    ],
+                ]
+            )
             response = await self._generate(
                 event,
                 prompt,
@@ -830,17 +872,73 @@ class MemeStealer(Star):
                     "reply_scene_provider_id",
                     "scene_provider_id",
                 ),
-                system_prompt=OUTGOING_DECISION_SYSTEM_PROMPT,
+                system_prompt=OUTGOING_DECISION_COMPACT_PROMPT,
             )
             choice = parse_model_json(response)
-            if not self._model_bool(choice.get("should_send"), default=False):
+            should_send = self._model_bool(choice.get("should_send"), default=False)
+            reason = str(choice.get("reason", "") or "")[:80]
+            confidence = choice.get("confidence", "")
+            if not should_send:
+                logger.info(
+                    "[meme_stealer] 情景分析决定不发送 confidence=%s reason=%s",
+                    confidence,
+                    reason,
+                )
                 return None
             candidate_id = str(choice.get("candidate_id", "")).strip()
             for item in candidates:
                 if candidate_id in {item["id"], item["filename"]}:
+                    details = self._image_details(item["path"])
+                    logger.info(
+                        "[meme_stealer] 情景分析决定发送 category=%s candidate=%s "
+                        "confidence=%s reason=%s description=%s",
+                        details["category"],
+                        candidate_id,
+                        confidence,
+                        reason,
+                        details["description"],
+                    )
                     return item["path"]
+            logger.warning(
+                "[meme_stealer] 情景分析选择了不存在的候选 candidate=%s reason=%s",
+                candidate_id,
+                reason,
+            )
         except Exception as exc:
             logger.warning("[meme_stealer] 单次智能回复决策失败，不发送表情包: %s", exc)
+        return None
+
+    def _image_details(self, path: Path) -> dict[str, object]:
+        category = path.parent.name
+        catalog = self.store.load_catalog(category)
+        entry = next(
+            (
+                item
+                for item in catalog.get("items", [])
+                if isinstance(item, dict) and item.get("filename") == path.name
+            ),
+            {},
+        )
+        tags = entry.get("tags", []) if isinstance(entry, dict) else []
+        if not isinstance(tags, list):
+            tags = [tags]
+        return {
+            "category": category,
+            "filename": path.name,
+            "description": str(entry.get("description", "") or "")[:120],
+            "emotion": str(entry.get("emotion", "") or "")[:40],
+            "tags": [str(tag)[:30] for tag in tags[:5]],
+        }
+
+    def _pick_marked_meme(self, categories: list[str]) -> Path | None:
+        """Pick an image from the category explicitly selected by meme_manager."""
+        available = self.store.available_categories()
+        for category in categories:
+            if category not in available:
+                continue
+            image_path = self.store.pick_image(category)
+            if image_path is not None:
+                return image_path
         return None
 
     @staticmethod
