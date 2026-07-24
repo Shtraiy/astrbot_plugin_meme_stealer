@@ -99,6 +99,20 @@ def group_id_from_event(event: Any) -> str:
     return str(group_id or "").strip()
 
 
+def event_identity(event: Any) -> str:
+    """Return a stable identity for one incoming message event."""
+    umo = str(_read_value(event, "unified_msg_origin", "") or "").strip()
+    objects = [event, _read_value(event, "message_obj"), _read_value(event, "message")]
+    for current in objects:
+        if current is None:
+            continue
+        for field in ("message_id", "msg_id", "event_id", "id"):
+            value = _read_value(current, field, "")
+            if value not in (None, ""):
+                return f"{umo}:{field}:{value}"
+    return f"{umo}:object:{id(event)}"
+
+
 def whitelist_allows(event: Any, whitelist: Sequence[str] | None) -> bool:
     """Return whether a group event matches an empty-or-explicit whitelist."""
     entries = {str(item).strip() for item in (whitelist or []) if str(item).strip()}

@@ -28,7 +28,7 @@
 - `only_capture_memes`：开启后跳过视觉模型判定为普通照片的图片。
 - `fallback_category`：模型不可用或返回非法分类时的降级目录，默认 `confused`。
 - `max_images_per_message`、`max_image_size_mb`、`max_concurrent`：控制资源和模型调用成本。
-- `health_check_interval`：依赖插件健康检查间隔，默认 60 秒。
+- `health_check_interval`：依赖插件健康检查和后台索引检查间隔，默认 300 秒（5 分钟）。
 - `auto_send_enabled`：启用后由本插件统一接管自动表情包发送，默认开启。
 - `proactive_send_after_steal`：偷取成功后通过独立主动消息发送最近保存的表情包，默认关闭；开启后自动监听收图也会发送，请谨慎开启。
 - `auto_send_probability`：情景模型判定适合发送后，实际发送概率，默认 35%。
@@ -83,7 +83,7 @@ README.md    # 人类可读的图片管理表
 
 图片默认会在原目录内重命名为 `shy_0001.png`、`happy_0002.jpg` 等稳定编号。后台会按 `library_index_batch_size` 批量调用多模态模型，并把进度写入 AstrBot 日志。整理失败的图片不会删除，只会在索引中标记为“待重新识别”；后续健康检查会再次尝试。
 
-自动回复表情现在将“是否发送、选择分类、候选图片匹配”合并为一次多模态模型调用；`auto_send_probability` 和 `auto_send_cooldown` 会在调用前生效，用于避免不必要的请求。
+自动回复表情现在由情景模型判断“是否发送”和“选择分类”，随后直接读取对应分类的 `index.json` 选择图片，不再把目录列表或多张候选图片交给 Agent；`auto_send_probability` 和 `auto_send_cooldown` 会在调用前生效，用于避免不必要的请求。
 
 插件支持的默认分类包括 `angry`、`happy`、`sad`、`surprised`、`confused`、`color`、`cpu`、`fool`、`givemoney`、`like`、`see`、`shy`、`work`、`reply`、`meow`、`baka`、`morning`、`sleep`、`sigh`。如果 meme_manager 已有自定义分类，插件会优先读取本地目录和 `memes_data.json`。
 

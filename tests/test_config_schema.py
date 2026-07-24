@@ -39,6 +39,14 @@ class ConfigSchemaTests(unittest.TestCase):
             self.assertIsInstance(value, dict, key)
             self.assertIn(value.get("type"), supported_types, key)
 
+    def test_health_check_interval_defaults_to_five_minutes(self):
+        schema = json.loads(
+            (Path(__file__).resolve().parents[1] / "_conf_schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(schema["health_check_interval"]["default"], 300)
+
     def test_model_settings_use_astrbot_provider_selector(self):
         schema = json.loads(
             (Path(__file__).resolve().parents[1] / "_conf_schema.json").read_text(

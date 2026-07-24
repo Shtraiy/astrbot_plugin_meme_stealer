@@ -88,7 +88,7 @@
     "health_check_interval": {
       "type": "int",
       "description": "检查 meme_manager 插件和数据目录的间隔（秒）",
-      "default": 60,
+      "default": 300,
       "minimum": 10,
       "maximum": 600
     },

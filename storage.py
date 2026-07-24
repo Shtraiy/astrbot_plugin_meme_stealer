@@ -171,6 +171,27 @@ class MemeStore:
         ]
         return random.choice(candidates) if candidates else None
 
+    def pick_indexed_image(self, category: str) -> Path | None:
+        """Pick one existing image referenced by the category index."""
+        if not _is_safe_segment(category):
+            return None
+        category_dir = self.memes_dir / category
+        if not category_dir.is_dir():
+            return None
+        candidates = []
+        for item in self.load_catalog(category).get("items", []):
+            if not isinstance(item, dict):
+                continue
+            filename = Path(str(item.get("filename", ""))).name
+            path = category_dir / filename
+            if (
+                filename == str(item.get("filename", ""))
+                and path.is_file()
+                and path.suffix.lower() in IMAGE_EXTENSIONS
+            ):
+                candidates.append(path)
+        return random.choice(candidates) if candidates else None
+
     def image_paths(self, category: str) -> list[Path]:
         """Return image files in one safe category, excluding catalog documents."""
         if not _is_safe_segment(category):

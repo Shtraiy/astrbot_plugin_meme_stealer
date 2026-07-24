@@ -5,6 +5,7 @@ from collector import (
     explicit_meme_request,
     extract_meme_markers,
     extract_image_sources,
+    event_identity,
     normalize_category,
     parse_model_json,
     strip_meme_markers,
@@ -19,6 +20,22 @@ class FakeEvent:
 
 
 class CollectorTests(unittest.TestCase):
+    def test_event_identity_uses_message_id(self):
+        first = FakeEvent()
+        second = FakeEvent()
+        first.message_id = "message-42"
+        second.message_id = "message-42"
+
+        self.assertEqual(event_identity(first), event_identity(second))
+
+    def test_event_identity_changes_for_different_messages(self):
+        first = FakeEvent()
+        second = FakeEvent()
+        first.message_id = "message-42"
+        second.message_id = "message-43"
+
+        self.assertNotEqual(event_identity(first), event_identity(second))
+
     def test_provider_id_uses_override_then_fallback(self):
         config = {"scene_provider_id": "scene-model"}
 

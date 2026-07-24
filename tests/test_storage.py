@@ -53,6 +53,19 @@ class StorageTests(unittest.TestCase):
             self.assertEqual(picked.suffix, ".png")
             self.assertIsNone(store.pick_image("sad"))
 
+    def test_pick_indexed_image_uses_catalog_entries_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = MemeStore(Path(directory))
+            category_dir = Path(directory) / "memes" / "happy"
+            category_dir.mkdir(parents=True)
+            (category_dir / "happy_0001.png").write_bytes(b"indexed")
+            (category_dir / "unindexed.png").write_bytes(b"unindexed")
+            store.write_catalog("happy", [{"filename": "happy_0001.png"}])
+
+            picked = store.pick_indexed_image("happy")
+
+            self.assertEqual(picked, category_dir / "happy_0001.png")
+
     def test_renumber_category_and_write_catalog(self):
         with tempfile.TemporaryDirectory() as directory:
             store = MemeStore(Path(directory))

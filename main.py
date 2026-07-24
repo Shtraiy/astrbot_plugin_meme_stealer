@@ -23,6 +23,7 @@ from astrbot.api.star import Context, Star, register
 
 from .collector import (
     configured_provider_id,
+    event_identity,
     explicit_meme_request,
     extract_meme_markers,
     extract_image_sources,
@@ -100,6 +101,14 @@ OUTGOING_DECISION_COMPACT_PROMPT = """
 """.strip()
 
 
+OUTGOING_CATEGORY_PROMPT = """
+你是表情包情景分类器。
+根据用户消息和机器人回复，判断是否发送表情包；若发送，只能从候选分类中选一个最合适的 category。
+explicit_request=true 只表示用户明确索要图片，仍由你根据情景决定 should_send。
+只输出 JSON：{"should_send":false,"category":"","confidence":0.0,"reason":"不超过20字"}
+""".strip()
+
+
 LIBRARY_INDEX_VERSION = 2
 LIBRARY_INDEX_PROMPT_VERSION = "library-batch-v2"
 
@@ -134,6 +143,8 @@ class MemeStealer(Star):
         self._library_task: asyncio.Task | None = None
         self._library_lock = asyncio.Lock()
         self._last_auto_send: dict[str, float] = {}
+        self._auto_send_claims: dict[str, float] = {}
+        self._auto_send_claim_lock = asyncio.Lock()
         self._last_stolen_image: dict[str, Path] = {}
 
     async def initialize(self) -> None:
@@ -143,7 +154,7 @@ class MemeStealer(Star):
 
     async def _health_loop(self) -> None:
         while True:
-            await asyncio.sleep(self._float_config("health_check_interval", 60, 10, 600))
+            await asyncio.sleep(self._float_config("health_check_interval", 300, 10, 600))
             await self._refresh_health()
 
     async def _refresh_health(self, force: bool = False) -> MemeManagerHealth:
@@ -161,10 +172,23 @@ class MemeStealer(Star):
         return health
 
     async def _manager_ready(self) -> bool:
-        interval = self._float_config("health_check_interval", 60, 10, 600)
+        interval = self._float_config("health_check_interval", 300, 10, 600)
         if time.monotonic() - self._last_health_check >= interval:
             await self._refresh_health()
         return self._health.ready
+
+    async def _claim_auto_send(self, event: AstrMessageEvent) -> bool:
+        """Allow only one automatic send attempt for one incoming event."""
+        key = event_identity(event)
+        async with self._auto_send_claim_lock:
+            if key in self._auto_send_claims:
+                logger.debug("[meme_stealer] 跳过同一事件的重复表情包发送 event=%s", key)
+                return False
+            self._auto_send_claims[key] = time.monotonic()
+            if len(self._auto_send_claims) > 1024:
+                oldest = min(self._auto_send_claims, key=self._auto_send_claims.get)
+                self._auto_send_claims.pop(oldest, None)
+            return True
 
     def _schedule_library_index(self) -> None:
         """Schedule an idempotent scan when meme_manager is healthy."""
@@ -375,7 +399,9 @@ class MemeStealer(Star):
         probability = self._float_config("auto_send_probability", 35, 0, 100)
         if not force_send and (probability <= 0 or random.random() * 100 >= probability):
             return
-        image_path = await self._choose_outgoing_meme(
+        if not await self._claim_auto_send(event):
+            return
+        image_path = await self._choose_outgoing_meme_from_index(
             event,
             "\n".join(plain_texts),
             force_send=force_send,
@@ -799,7 +825,118 @@ class MemeStealer(Star):
             }
         return result
 
-    async def _choose_outgoing_meme(
+    async def _choose_outgoing_meme_from_index(
+        self,
+        event: AstrMessageEvent,
+        response_text: str,
+        force_send: bool = False,
+        preferred_categories: list[str] | None = None,
+    ) -> Path | None:
+        """Let the scene model choose a category, then select from its index locally."""
+        descriptions = self.store.category_descriptions()
+        preferred = set(preferred_categories or [])
+        candidates = []
+        for category in sorted(descriptions):
+            if preferred and category not in preferred:
+                continue
+            catalog = self.store.load_catalog(category)
+            indexed_count = sum(
+                1
+                for item in catalog.get("items", [])
+                if isinstance(item, dict) and item.get("filename")
+            )
+            if indexed_count:
+                candidates.append(
+                    {
+                        "category": category,
+                        "description": str(descriptions.get(category, ""))[:100],
+                        "indexed_count": indexed_count,
+                    }
+                )
+        limit = self._int_config("auto_send_candidate_limit", 8, 2, 16)
+        if len(candidates) > limit:
+            candidates = random.sample(candidates, limit)
+        if not candidates:
+            logger.warning(
+                "[meme_stealer] 情景分析没有可用索引 category_hint=%s",
+                sorted(preferred) or "none",
+            )
+            return None
+
+        prompt = "\n".join(
+            [
+                f"用户:{self._event_text(event)[:300]}",
+                f"回复:{response_text[:600]}",
+                f"explicit_request={'true' if force_send else 'false'}",
+                f"category_hint={','.join(sorted(preferred)) or 'none'}",
+                "候选(category|说明|索引数量):",
+                *[
+                    f"{item['category']}|{item['description']}|{item['indexed_count']}"
+                    for item in candidates
+                ],
+            ]
+        )
+        try:
+            response = await self._generate(
+                event,
+                prompt,
+                image_urls=[],
+                provider_id=configured_provider_id(
+                    self.config,
+                    "reply_scene_provider_id",
+                    "scene_provider_id",
+                ),
+                system_prompt=OUTGOING_CATEGORY_PROMPT,
+            )
+            choice = parse_model_json(response)
+            reason = str(choice.get("reason", "") or "")[:80]
+            confidence = choice.get("confidence", "")
+            if not self._model_bool(choice.get("should_send"), default=False):
+                logger.info(
+                    "[meme_stealer] 情景分析决定不发送 confidence=%s reason=%s",
+                    confidence,
+                    reason,
+                )
+                return None
+
+            category = str(
+                choice.get("category") or choice.get("candidate_id") or ""
+            ).strip()
+            selected = next(
+                (item for item in candidates if item["category"] == category),
+                None,
+            )
+            if selected is None:
+                logger.warning(
+                    "[meme_stealer] 情景分析选择了不存在的分类 category=%s reason=%s",
+                    category,
+                    reason,
+                )
+                return None
+
+            image_path = self.store.pick_indexed_image(category)
+            if image_path is None:
+                logger.warning(
+                    "[meme_stealer] 分类索引没有可用图片 category=%s",
+                    category,
+                )
+                return None
+            details = self._image_details(image_path)
+            logger.info(
+                "[meme_stealer] 情景分析决定发送 category=%s confidence=%s "
+                "reason=%s description=%s indexed_count=%s",
+                category,
+                confidence,
+                reason,
+                details["description"],
+                selected["indexed_count"],
+            )
+            return image_path
+        except Exception as exc:
+            logger.warning("[meme_stealer] 分类索引发送决策失败，不发送表情包: %s", exc)
+            return None
+
+    async def _choose_outgoing_meme_legacy(
         self,
         event: AstrMessageEvent,
         response_text: str,
@@ -864,7 +1001,7 @@ class MemeStealer(Star):
             response = await self._generate(
                 event,
                 prompt,
-                image_urls=[str(item["path"]) for item in candidates],
+                image_urls=[],
                 provider_id=configured_provider_id(
                     self.config,
                     "reply_scene_provider_id",
